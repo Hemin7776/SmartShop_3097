@@ -1,7 +1,4 @@
-
-
 import SwiftUI
-
 struct homeWidgetComponent: View {
     var foreground : Color
     var image : String

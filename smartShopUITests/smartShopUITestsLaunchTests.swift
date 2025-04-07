@@ -1,5 +1,4 @@
 
-
 import XCTest
 
 final class smartShopUITestsLaunchTests: XCTestCase {

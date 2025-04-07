@@ -1,10 +1,17 @@
-
 import SwiftUI
-import SwiftData  
+import SwiftData
+
+enum CategoryCreationMode: String, CaseIterable {
+    case predefined = "Predefined"
+    case custom = "Custom"
+}
+
 struct CategoryScreen: View {
     @State private var showAddCategory = false
     @Environment(\.modelContext) private var modelContext
     @Query private var categories: [Category]
+    
+    private let predefinedNames = ["Food", "Cleaning", "Grocery", "Medication", "Electronics", "Clothing", "Home", "Books", "Sports", "Beauty"]
     
     var body: some View {
         NavigationStack {
@@ -19,11 +26,18 @@ struct CategoryScreen: View {
                                 smallWidget: false
                             )
                             .contextMenu {
-                                Button(role: .destructive) {
-                                    modelContext.delete(category)
-                                    try? modelContext.save()
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+                                // Only allow deletion if this is NOT a predefined category.
+                                if !isPredefined(category: category) {
+                                    Button(role: .destructive) {
+                                        do {
+                                            modelContext.delete(category)
+                                            try modelContext.save()
+                                        } catch {
+                                            print("Deletion error: \(error)")
+                                        }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
                                 }
                             }
                         }
@@ -64,13 +78,11 @@ struct CategoryScreen: View {
             }
         }
     }
+    
+    private func isPredefined(category: Category) -> Bool {
+        predefinedNames.contains(category.name)
+    }
 }
-
-#Preview {
-    CategoryScreen()
-}
-
-
 struct createCategoryButton: View {
     var action: () -> Void
     
@@ -91,134 +103,171 @@ struct createCategoryButton: View {
         }
     }
 }
-
-
-
-
 struct AddCategoryView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query private var savedCategories: [Category]
     
-    @State private var selectedCategory: CategoryOption?
+    @State private var customName = ""
+    @State private var selectedIcon = "folder"
+    @State private var selectedColor = Color.gray  // Default is gray
+    @State private var showingIconPicker = false
+    @State private var showingColorPicker = false
+    
+    // SF Symbols icons for selection
+    let systemIcons = ["folder", "tag", "cart", "heart", "star", "bookmark", "flag", "pencil", "photo", "trash"]
+    
+    // Color options (including gray)
+    let colorOptions: [Color] = [.red, .orange, .yellow, .green, .mint, .teal, .cyan, .blue, .indigo, .purple, .pink, .brown, .gray]
     
     var body: some View {
         NavigationStack {
             VStack {
-                Text("Select a Category")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .padding(.top)
-                
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                        ForEach(CategoryManager.shared.predefinedCategories) { category in
-                            if !savedCategories.contains(where: { $0.name == category.name }) {
-                                CategorySelectionItem(category: category, isSelected: selectedCategory?.id == category.id) {
-                                    selectedCategory = category
-                                }
-                            }
-                        }
-                    }
-                    .padding()
-                }
-                
-                if savedCategories.count == CategoryManager.shared.predefinedCategories.count {
-                    Text("You've added all available categories")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                        .padding()
-                }
-                
-                Button(action: {
-                    if let selected = selectedCategory {
-                        let newCategory = Category(
-                            name: selected.name,
-                            icon: selected.icon,
-                            color: CategoryManager.shared.colorToString(selected.color),
-                            isSelected: true
-                        )
-                        modelContext.insert(newCategory)
-                        
-                        dismiss()
-                    }
-                }) {
-                    Text("Add Category")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(selectedCategory != nil ? Color.appBlue : Color.gray)
-                        )
-                }
-                .disabled(selectedCategory == nil)
-                .padding()
+                customCategoryForm
+                addButton
             }
             .navigationTitle("Add Category")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showingIconPicker) {
+                iconPickerView
+            }
+            .sheet(isPresented: $showingColorPicker) {
+                ColorPickerGridView(selectedColor: $selectedColor, colorOptions: colorOptions)
+            }
+        }
+    }
+    
+    private var customCategoryForm: some View {
+        Form {
+            Section(header: Text("Custom Details")) {
+                TextField("Category Name", text: $customName)
+                
+                HStack {
+                    Text("Icon")
+                    Spacer()
+                    Button {
+                        showingIconPicker.toggle()
+                    } label: {
+                        Image(systemName: selectedIcon)
+                            .font(.title)
+                            .foregroundColor(selectedColor)
+                    }
+                }
+                
+                HStack {
+                    Text("Category Color")
+                    Spacer()
+                    Button {
+                        showingColorPicker.toggle()
+                    } label: {
+                        Circle()
+                            .fill(selectedColor)
+                            .frame(width: 30, height: 30)
                     }
                 }
             }
         }
     }
-}
-struct CategorySelectionItem: View {
-    let category: CategoryOption
-    let isSelected: Bool
-    let onTap: () -> Void
     
-    var body: some View {
-        VStack {
-            RoundedRectangle(cornerRadius: 10)
-                .frame(height: 100)
-                .foregroundStyle(category.color)
-                .overlay(
-                    VStack(spacing: 12) {
-                        Text(category.name)
-                            .font(.title3)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.foreground)
-                        
-                        Image(systemName: category.icon)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 40, height: 40)
+    private var iconPickerView: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 20) {
+                    ForEach(systemIcons, id: \.self) { icon in
+                        Button {
+                            selectedIcon = icon
+                            showingIconPicker = false
+                        } label: {
+                            Image(systemName: icon)
+                                .font(.largeTitle)
+                                .frame(width: 60, height: 60)
+                                .background(selectedColor.opacity(0.2))
+                                .cornerRadius(10)
+                        }
                     }
-                    .padding()
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(isSelected ? Color.appBlue : Color.clear, lineWidth: 3)
-                )
-        }
-        .onTapGesture {
-            onTap()
+                }
+                .padding()
+            }
+            .navigationTitle("Choose Icon")
         }
     }
-}
-struct EmptyCategoryScreen_Preview: PreviewProvider {
-    static var previews: some View {
-        CategoryScreen()
-            .modelContainer(for: Category.self, inMemory: true)
+    
+    private var addButton: some View {
+        Button(action: addCategory) {
+            Text("Add Category")
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isValidEntry ? Color.appBlue : Color.gray)
+                )
+                .padding()
+        }
+        .disabled(!isValidEntry)
+    }
+    
+    private var isValidEntry: Bool {
+   
+        return !customName.isEmpty && !savedCategories.contains { $0.name == customName }
+    }
+    
+    private func addCategory() {
+        let fetchDescriptor = FetchDescriptor<Category>(sortBy: [])
+        let existingCategories = (try? modelContext.fetch(fetchDescriptor)) ?? []
+        
+        if existingCategories.contains(where: { $0.name == customName }) {
+            dismiss()
+            return
+        }
+        
+        let newCategory = Category(
+            name: customName,
+            icon: selectedIcon,
+            color: CategoryManager.shared.colorToString(selectedColor),
+            isSelected: true
+        )
+        modelContext.insert(newCategory)
+        
+        do {
+            try modelContext.save()
+            dismiss()
+        } catch {
+            print("Error saving category: \(error)")
+        }
     }
 }
 
-struct CategoryScreenWithData_Preview: PreviewProvider {
-    static var previews: some View {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try! ModelContainer(for: Category.self, configurations: config)
-        
-        let context = container.mainContext
-        context.insert(Category(name: "Food", icon: "fork.knife", color: "orange", isSelected: true))
-        context.insert(Category(name: "Cleaning", icon: "hands.and.sparkles.fill", color: "cyan", isSelected: true))
-        
-        return CategoryScreen()
-            .modelContainer(container)
+struct ColorPickerGridView: View {
+    @Binding var selectedColor: Color
+    let colorOptions: [Color]
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 20) {
+                    ForEach(colorOptions, id: \.self) { color in
+                        Button {
+                            selectedColor = color
+                        } label: {
+                            Circle()
+                                .fill(color)
+                                .frame(width: 40, height: 40)
+                                .overlay(
+                                    Circle().stroke(selectedColor == color ? Color.primary : Color.clear, lineWidth: 2)
+                                )
+                        }
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Choose Color")
+        }
     }
 }
